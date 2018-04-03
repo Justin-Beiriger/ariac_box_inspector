@@ -64,8 +64,43 @@ void BoxInspector::get_new_snapshot_from_box_cam() {
   misplaced_models_desired_coords_wrt_world.clear();
   missing_models_wrt_world.clear();
 
-  //THIS  IS WRONG...but an example of how to get models from image and sort into category vectors
+  osrf_gear::Model model_seen;
+  osrf_gear::Model model_desired;
+  int num_parts_desired = desired_models_wrt_world.size();
+  double translational_error, rotational_error;
+  
+  // translational_error_tolerance is real world tolerance in m
+  double translational_error_tolerance = 0.1;
+  // translational_tolerance is effective tolerance used in the code to avoid using sqrt func
+  double translational_tolerance = translational_error_tolerance * translational_error_tolerance;
+  
+  // allowable rotational error (rad)
+  double rotational_tolerance = 0.1;
+  
+  
+  // loop through each part seen and compare to all desired parts of same type
   for (int i=0;i<num_parts_seen;i++) {
+      model_seen = box_inspector_image_.models[i];
+      
+      for (int j = 0; j < num_parts_desired; j++) {
+          model_desired = desired_models_wrt_world[j];
+          if (model_seen.type = model_desired.type) {
+              // compute delta distance and delta rotation for each part
+              dx = model_seen.pose.x - model_desired.pose.x;
+              dy = model_seen.pose.x - model_desired.pose.y;
+              dz = model_seen.pose.x - model_desired.pose.z;
+              
+              translational_error = dx*dx + dy*dy + dz*dz;
+              
+              // ADD IN ROTATIONAL ERROR AND TOLERANCE CHECK
+              
+              // if the part is where it should be, add it to the satisfied models list
+              if (translational_error < translational_tolerance) {
+                  satisfied_models_wrt_world.push_back(model_seen);
+              }
+          }
+      }
+     
      orphan_models_wrt_world.push_back(box_inspector_image_.models[i]);
   }
   

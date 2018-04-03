@@ -1,13 +1,17 @@
 
 
 
+#include <vector>
+
+
 //given an image, compute all models w/rt box and return in a "Shipment" object
 bool BoxInspector::model_poses_wrt_box(osrf_gear::Shipment &shipment_status) {
     ROS_INFO("model_poses_wrt_box()");
     geometry_msgs::Pose cam_pose, box_pose_wrt_cam, model_pose_wrt_cam, part_pose_wrt_box;
-    geometry_msgs::PoseStamped box_pose_wrt_world, part_pose_wrt_world;
+    geometry_msgs::PoseStamped box_pose_wrt_world, part_pose_wrt_world, world_pose_wrt_box;
     Eigen::Affine3d affine_cam_wrt_world, affine_part_wrt_cam, affine_part_wrt_box,
             affine_box_pose_wrt_world, affine_part_wrt_world;
+    tf::StampedTransform tf_box_wrt_world, tf_world_wrt_box;
 
     get_new_snapshot_from_box_cam();
     bool found_box = false;
@@ -56,8 +60,13 @@ bool BoxInspector::model_poses_wrt_box(osrf_gear::Shipment &shipment_status) {
             part_pose_wrt_world = compute_stPose(cam_pose, model_pose_wrt_cam);
             ROS_INFO_STREAM("part pose wrt world: " << part_pose_wrt_world << endl);
             
-            ROS_WARN("model_poses_wrt_box(): FINISH ME!  compute part_pose_wrt_box");
-            //MISSING LINES HERE...
+            // compute transforms to get part poses with respect to the box frame
+            string child_frame_id(box_pose_wrt_world.header.frame_id);
+            tf_box_wrt_world = xformUtils_.convert_poseStamped_to_stampedTransform(box_pose_wrt_world, child_frame_id);
+            tf_world_wrt_box = xformUtils_.stamped_transform_inverse(tf_box_wrt_world);
+            world_pose_wrt_box = xformUtils_.get_pose_from_stamped_tf(tf_world_wrt_box);
+            
+            part_pose_wrt_box = compute_stPose(world_pose_wrt_box.pose, part_pose_wrt_world.pose).pose;
             
             //put this into "shipment"  object:
             //string shipment_type
@@ -82,9 +91,25 @@ bool BoxInspector::model_poses_wrt_box(osrf_gear::Shipment &shipment_status) {
 void BoxInspector::compute_shipment_poses_wrt_world(osrf_gear::Shipment shipment_wrt_box,
         geometry_msgs::PoseStamped box_pose_wrt_world,
         vector<osrf_gear::Model> &desired_models_wrt_world) {
-
-    ROS_WARN("WRITE THIS FNC! compute_shipment_poses_wrt_world()");
-    //compute and fill in terms in desired_models_wrt_world
+    
+    // number of parts in shipment order
+    int num_parts = shipment_wrt_box.products.size();
+    geometry_msgs::PoseStamped part_pose_wrt_world;
+    geometry_msgs::Pose part_pose_wrt_box;
+    string type;
+    osrf_gear::Model model;
+        
+    for (int i = 0; i < num_parts; i++) {
+        type = shipment_wrt_box.products[i].type;
+        part_pose_wrt_box = shipment_wrt_box.products[i].pose;
+        part_pose_wrt_world = compute_stPose(box_pose_wrt_world.pose, part_pose_wrt_box);
+        
+        model.type = type;
+        model.pose = part_pose_wrt_world.pose;
+        
+        desired_models_wrt_world.push_back(model);
+        
+    }
+    
 }
-
 
