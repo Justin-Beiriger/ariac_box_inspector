@@ -47,8 +47,6 @@ void BoxInspector::get_new_snapshot_from_box_cam() {
        vector<osrf_gear::Model> &misplaced_models_desired_coords_wrt_world,
        vector<osrf_gear::Model> &missing_models_wrt_world,
        vector<osrf_gear::Model> &orphan_models_wrt_world) {
-  //WRITE ME!!!
-  ROS_WARN("NEED TO WRITE update_inspection() ");
   got_new_snapshot_=false;
   while(!got_new_snapshot_) {
      ros::spinOnce(); // refresh camera image
@@ -63,45 +61,150 @@ void BoxInspector::get_new_snapshot_from_box_cam() {
   misplaced_models_actual_coords_wrt_world.clear();
   misplaced_models_desired_coords_wrt_world.clear();
   missing_models_wrt_world.clear();
-
-  osrf_gear::Model model_seen;
-  osrf_gear::Model model_desired;
+  
+  // convert models wrt cam to models wrt world
+  geometry_msgs::Pose cam_pose, model_pose_wrt_world;
+  cam_pose = box_inspector_image_.pose;
+  vector<osrf_gear::Model> models_seen_wrt_world;
+  osrf_gear::Model model_seen_wrt_world;
+  
+  // convert logical camera output to coordinates wrt world frame
+  for (int i=0; i<num_parts_seen;i++) {
+      model_pose_wrt_world = compute_stPose(cam_pose, box_inspector_image_.models[i].pose).pose;
+      model_seen_wrt_world.type = box_inspector_image_.models[i].type;
+      model_seen_wrt_world.pose = model_pose_wrt_world;
+      models_seen_wrt_world.push_back(model_seen_wrt_world);
+  }
+  
+  osrf_gear::Model model_seen, model_desired;
   int num_parts_desired = desired_models_wrt_world.size();
-  double translational_error, rotational_error;
-  
-  // translational_error_tolerance is real world tolerance in m
-  double translational_error_tolerance = 0.1;
-  // translational_tolerance is effective tolerance used in the code to avoid using sqrt func
-  double translational_tolerance = translational_error_tolerance * translational_error_tolerance;
-  
+  double translational_error, rotation_seen, rotation_desired, rotational_error, dx, dy, dz;
+  // allowable translational error in m
+  double translational_tolerance = 0.1;
   // allowable rotational error (rad)
   double rotational_tolerance = 0.1;
   
   
+  vector<osrf_gear::Model> models_seen_not_properly_placed;
+  vector<osrf_gear::Model> models_desired_not_accounted_for;
+ 
+  bool isProperlyPlaced;
+  vector<bool> isAccountedFor;
+  // initialize vector 
+  for (int i=0; i<num_parts_desired; i++) {
+      isAccountedFor.push_back(false);
+  }
+  
   // loop through each part seen and compare to all desired parts of same type
+  // this loop extracts the parts that are in the right place
   for (int i=0;i<num_parts_seen;i++) {
-      model_seen = box_inspector_image_.models[i];
+      model_seen = models_seen_wrt_world[i];
+      
+      // check to see if each seen part is properly placed
+      isProperlyPlaced = false;
       
       for (int j = 0; j < num_parts_desired; j++) {
           model_desired = desired_models_wrt_world[j];
-          if (model_seen.type = model_desired.type) {
-              // compute delta distance and delta rotation for each part
-              dx = model_seen.pose.x - model_desired.pose.x;
-              dy = model_seen.pose.x - model_desired.pose.y;
-              dz = model_seen.pose.x - model_desired.pose.z;
+          if (model_seen.type == model_desired.type) {
+              // compute translational and rotational error for each part
+              dx = model_seen.pose.position.x - model_desired.pose.position.x;
+              dy = model_seen.pose.position.y - model_desired.pose.position.y;
+              dz = model_seen.pose.position.z - model_desired.pose.position.z;
               
               translational_error = dx*dx + dy*dy + dz*dz;
               
-              // ADD IN ROTATIONAL ERROR AND TOLERANCE CHECK
+              rotation_seen = xformUtils_.convertPlanarQuat2Phi(model_seen.pose.orientation);
+              rotation_desired = xformUtils_.convertPlanarQuat2Phi(model_desired.pose.orientation);
+              
+              rotational_error = rotation_seen - rotation_desired;
+              if (rotational_error < 0) {
+                  rotational_error = -1*rotational_error;
+              }
               
               // if the part is where it should be, add it to the satisfied models list
-              if (translational_error < translational_tolerance) {
+              if (translational_error < (translational_tolerance*translational_tolerance) && (rotational_error < rotational_tolerance)) {
                   satisfied_models_wrt_world.push_back(model_seen);
+                  isProperlyPlaced = true;
+                  isAccountedFor[j] = true;
               }
           }
       }
+      
+      if (!isProperlyPlaced) {
+          models_seen_not_properly_placed.push_back(model_seen);
+      }
      
-     orphan_models_wrt_world.push_back(box_inspector_image_.models[i]);
+  }
+  
+  // create vector of models that have not been accounted for
+  for (int i=0; i<num_parts_desired; i++) {
+      // if part has not been accounted for, add it to the vector
+      if (!isAccountedFor[i])
+          models_desired_not_accounted_for.push_back(desired_models_wrt_world[i]);
+  }
+  
+  int index_of_closest_seen_part;
+  double error_of_closest_part = 100;
+  bool found_misplaced_part; 
+  vector<osrf_gear::Model> save_models_not_properly_placed;
+  
+  // at this point, all the models in correct poses are in the vector satisfied_models_wrt_world
+  // and all the models that are seen that are not in correct poses are models_not_properly_placed
+  // Now, find all misplaced parts
+  for (int i=0; i<models_desired_not_accounted_for.size(); i++) {
+      model_desired = models_desired_not_accounted_for[i];
+      found_misplaced_part = false;
+      error_of_closest_part = 100;
+      
+      for (int j=0; j<models_seen_not_properly_placed.size(); j++) {
+          model_seen = models_seen_not_properly_placed[j];
+          
+          if (model_seen.type == model_desired.type) {
+              // compute translational error for each part
+              dx = model_seen.pose.position.x - model_desired.pose.position.x;
+              dy = model_seen.pose.position.y - model_desired.pose.position.y;
+              dz = model_seen.pose.position.z - model_desired.pose.position.z;
+              
+              translational_error = dx*dx + dy*dy + dz*dz;
+              
+              if (j == 0) {
+                  error_of_closest_part = translational_error;
+                  found_misplaced_part = true;
+                  index_of_closest_seen_part = j;
+              }
+              else if (translational_error < error_of_closest_part) {
+                  index_of_closest_seen_part = j;
+                  error_of_closest_part = translational_error;
+              }
+              
+          }
+      }
+      
+      // remove the closest part from models_seen_not_properly_placed vector 
+      if (found_misplaced_part) {
+          save_models_not_properly_placed = models_seen_not_properly_placed;
+          models_seen_not_properly_placed.clear();
+          for (int k=0; k<save_models_not_properly_placed.size(); k++) {
+              if (k != index_of_closest_seen_part) {
+                  models_seen_not_properly_placed.push_back(save_models_not_properly_placed[k]);
+              }
+              else {
+                  misplaced_models_actual_coords_wrt_world.push_back(save_models_not_properly_placed[k]);
+                  misplaced_models_desired_coords_wrt_world.push_back(model_desired);
+              }
+          }
+      }
+      else {
+          missing_models_wrt_world.push_back(model_desired);
+      }
+      
+  }
+  
+  
+  // at this point, all parts are in the correct vectors except orphan parts
+  // orphan parts are in the vector models_seen_not_properly_placed
+  for (int i=0; i<models_seen_not_properly_placed.size(); i++) {
+      orphan_models_wrt_world.push_back(models_seen_not_properly_placed[i]);
   }
   
 

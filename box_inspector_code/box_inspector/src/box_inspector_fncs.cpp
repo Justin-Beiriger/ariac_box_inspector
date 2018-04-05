@@ -2,6 +2,7 @@
 
 
 #include <vector>
+#include <eigen3/Eigen/src/Geometry/Transform.h>
 
 
 //given an image, compute all models w/rt box and return in a "Shipment" object
@@ -10,7 +11,7 @@ bool BoxInspector::model_poses_wrt_box(osrf_gear::Shipment &shipment_status) {
     geometry_msgs::Pose cam_pose, box_pose_wrt_cam, model_pose_wrt_cam, part_pose_wrt_box;
     geometry_msgs::PoseStamped box_pose_wrt_world, part_pose_wrt_world, world_pose_wrt_box;
     Eigen::Affine3d affine_cam_wrt_world, affine_part_wrt_cam, affine_part_wrt_box,
-            affine_box_pose_wrt_world, affine_part_wrt_world;
+            affine_box_pose_wrt_world, affine_part_wrt_world, affine_world_pose_wrt_box;
     tf::StampedTransform tf_box_wrt_world, tf_world_wrt_box;
 
     get_new_snapshot_from_box_cam();
@@ -62,10 +63,9 @@ bool BoxInspector::model_poses_wrt_box(osrf_gear::Shipment &shipment_status) {
             
             // compute transforms to get part poses with respect to the box frame
             string child_frame_id(box_pose_wrt_world.header.frame_id);
-            tf_box_wrt_world = xformUtils_.convert_poseStamped_to_stampedTransform(box_pose_wrt_world, child_frame_id);
-            tf_world_wrt_box = xformUtils_.stamped_transform_inverse(tf_box_wrt_world);
-            world_pose_wrt_box = xformUtils_.get_pose_from_stamped_tf(tf_world_wrt_box);
-            
+            affine_box_pose_wrt_world = xformUtils_.transformPoseToEigenAffine3d(box_pose_wrt_world);
+            affine_world_pose_wrt_box = affine_box_pose_wrt_world.inverse();
+            world_pose_wrt_box = xformUtils_.transformEigenAffine3dToPoseStamped(affine_world_pose_wrt_box);
             part_pose_wrt_box = compute_stPose(world_pose_wrt_box.pose, part_pose_wrt_world.pose).pose;
             
             //put this into "shipment"  object:
